@@ -1,0 +1,426 @@
+{
+ "cells": [
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": true,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   },
+   "outputs": [],
+   "source": [
+    "import os\n",
+    "import numpy as np\n",
+    "import pandas as pd\n",
+    "from tqdm import tqdm\n",
+    "import matplotlib.pyplot as plt\n",
+    "from matplotlib.patches import Patch\n",
+    "from task_generation.gaussian_process import GaussianProcess, PracticeMode"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "# Evaluation of Collected Data"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "### 1. Collect data\n",
+    "\n",
+    "*load all \\*.h5 files into comp_scaffold/DexmoPiano/practice_data/*"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "data_dir = './practice_data/'\n",
+    "data = pd.concat([pd.read_hdf(data_dir + filename) for filename in os.listdir(data_dir)], axis=0, ignore_index=True)\n",
+    "data.head(10)"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   }
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "### 2. Initialize Gaussian Process"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "gp = GaussianProcess()"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   }
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "### 3. Choose utility measure"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "def error_diff_to_utility(error_pre, error_post):\n",
+    "    diff_timing = (error_pre[\"timing_left\"] + error_pre[\"timing_right\"]) - (\n",
+    "            error_post[\"timing_left\"] + error_post[\"timing_right\"])\n",
+    "    diff_pitch = (error_pre[\"pitch_left\"] + error_pre[\"pitch_right\"]) - (\n",
+    "            error_post[\"pitch_left\"] + error_post[\"pitch_right\"])\n",
+    "\n",
+    "    return (diff_timing + diff_pitch) / 2"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   }
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "### 4. Train Model with datapoints"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "for index, d in tqdm(data.iterrows()):\n",
+    "    error = {'error_pre': {'timing_left': d['error_before_left_timing'],\n",
+    "                           'timing_right': d['error_before_right_timing'],\n",
+    "                           'pitch_left': d['error_before_left_pitch'],\n",
+    "                           'pitch_right': d['error_before_right_pitch']},\n",
+    "             'error_post': {'timing_left': d['error_after_left_timing'],\n",
+    "                            'timing_right': d['error_after_right_timing'],\n",
+    "                            'pitch_left': d['error_after_left_pitch'],\n",
+    "                            'pitch_right': d['error_after_right_pitch']}}\n",
+    "    # calculate utility from error_pre and error_post\n",
+    "    utility = error_diff_to_utility(error['error_pre'], error['error_post'])\n",
+    "    practice_mode = None\n",
+    "    if d['practice_mode'] == 'IMP_TIMING':\n",
+    "        practice_mode = PracticeMode.IMP_TIMING\n",
+    "    elif d['practice_mode'] == 'IMP_PITCH':\n",
+    "        practice_mode = PracticeMode.IMP_PITCH\n",
+    "\n",
+    "    # add data-point to GP\n",
+    "    gp.add_data_point(error['error_pre'], d['bpm'], practice_mode, utility)\n",
+    "    gp.update_model()"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   }
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "### 5. Plot data"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "# Different functions used to deliver a utility value to the plot_utility function -------------------------------------\n",
+    "\n",
+    "# returns the utility estimate of a gaussian process for a specific practice mode\n",
+    "def _utility_gp(bpm, practice_mode, error_pre):\n",
+    "    return gp.get_estimate(error_pre, bpm, practice_mode)\n",
+    "\n",
+    "# wrapper function to abstract arguments gaussian process and practice mode\n",
+    "def utility_gp(bpm, practice_mode):\n",
+    "    return lambda error_pre: _utility_gp(bpm, practice_mode, error_pre)[0]\n",
+    "\n",
+    "def plot_utility(utility_function, density=50, title=\"Utility\", data_points=None):\n",
+    "    plot_data = []\n",
+    "    for i, error_pitch in enumerate(np.linspace(0, 1, density)):\n",
+    "        for j, error_timing in enumerate(np.linspace(0, 1, density)):\n",
+    "            error_pre = {\n",
+    "                'pitch_left': 0,\n",
+    "                'pitch_right': error_pitch,\n",
+    "                'timing_left': 0,\n",
+    "                'timing_right': error_timing\n",
+    "            }\n",
+    "            utility = utility_function(error_pre)\n",
+    "\n",
+    "            plot_data.append([error_pitch, error_timing, utility])\n",
+    "\n",
+    "    plot_data = np.array(plot_data)\n",
+    "\n",
+    "    fig = plt.figure(figsize=(10, 7))\n",
+    "    ax = plt.axes(projection=\"3d\")\n",
+    "\n",
+    "    ax.scatter3D(plot_data[:, 0], plot_data[:, 1], plot_data[:, 2], s=8)\n",
+    "\n",
+    "    if data_points is not None:\n",
+    "        ax.scatter3D(data_points[:, 0], data_points[:, 1], data_points[:, 2], color=\"red\", alpha=0.6)\n",
+    "\n",
+    "    ax.set_title(title)\n",
+    "    ax.set_xlabel('error_pitch')\n",
+    "    ax.set_ylabel('error_timing')\n",
+    "    ax.set_zlabel('utility')\n",
+    "    ax.set_zlim(0, 0.5)\n",
+    "\n",
+    "    plt.show()"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   }
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "#### 5.1. Training points"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "users = list(set(data[\"username\"]))\n",
+    "midi_name = list(set(data[\"midi_filename\"]))\n",
+    "\n",
+    "figure, axis = plt.subplots(1, 3, figsize=(15, 5))\n",
+    "\n",
+    "axis[0].scatter(data['error_before_right_pitch'], data['error_before_right_timing'], label=None, c='gray')\n",
+    "axis[0].set_title('training datapoints')\n",
+    "axis[0].set_xlabel('pitch_error')\n",
+    "axis[0].set_ylabel('timing_error')\n",
+    "\n",
+    "for index, u in enumerate(users):\n",
+    "    axis[1].scatter(data.loc[data[\"username\"] == u]['error_before_right_pitch'],\n",
+    "                    data.loc[data[\"username\"] == u]['error_before_right_timing'], label=u)\n",
+    "axis[1].set_title('training datapoints by username')\n",
+    "axis[1].set_xlabel('pitch_error')\n",
+    "axis[1].set_ylabel('timing_error')\n",
+    "axis[1].legend()\n",
+    "\n",
+    "for i, m in enumerate(midi_name):\n",
+    "    axis[2].scatter(data.loc[data[\"midi_filename\"] == m]['error_before_right_pitch'],\n",
+    "                    data.loc[data[\"midi_filename\"] == m]['error_before_right_timing'], label=m)\n",
+    "axis[2].set_title('training datapoints by music piece')\n",
+    "axis[2].set_xlabel('pitch_error')\n",
+    "axis[2].set_ylabel('timing_error')\n",
+    "axis[2].legend()\n",
+    "figure.suptitle(\"Training datapoints\", fontsize=16)\n",
+    "plt.tight_layout()\n",
+    "plt.show()"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   }
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "#### 5.2. Policy"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "training_points = {\n",
+    "    0: [],  # pitch\n",
+    "    1: [],  # timing\n",
+    "}\n",
+    "\n",
+    "for i, point in enumerate(gp.data_X):\n",
+    "    training_points[point[0]].append([point[3], point[5], gp.data_Y[i][0]])\n",
+    "\n",
+    "for i in range(2):\n",
+    "    training_points[i] = np.array(training_points[i])\n",
+    "\n",
+    "density = 100\n",
+    "best_mode = np.zeros((density, density))\n",
+    "for i, error_pitch in enumerate(np.linspace(0, 1, density)):\n",
+    "    for j, error_timing in enumerate(np.linspace(0, 1, density)):\n",
+    "        best_pm = gp.get_best_practice_mode({\n",
+    "            'pitch_left': 0,\n",
+    "            'pitch_right': error_pitch,\n",
+    "            'timing_left': 0,\n",
+    "            'timing_right': error_timing\n",
+    "        }, bpm=60, epsilon=0)\n",
+    "        if best_pm == PracticeMode.IMP_PITCH:\n",
+    "            best_mode[i][j] = 0\n",
+    "        elif best_pm == PracticeMode.IMP_TIMING:\n",
+    "            best_mode[i][j] = 1\n",
+    "        else:\n",
+    "            best_mode[i][j] = 2\n",
+    "\n",
+    "plt.pcolormesh(np.linspace(0, 1, density), np.linspace(0, 1, density), best_mode)\n",
+    "plt.title(\"GP's Estimate for best Practice Mode\")\n",
+    "plt.ylabel(\"error_pitch\")\n",
+    "plt.xlabel(\"error_timing\")\n",
+    "\n",
+    "cmap = plt.cm.viridis\n",
+    "custom_lines = [Patch(facecolor=cmap(0.)),\n",
+    "                Patch(facecolor=cmap(1.))]\n",
+    "plt.legend(custom_lines, [\"IMP_PITCH\", \"IMP_TIMING\"])\n",
+    "plt.show()"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   }
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "#### 5.3. Utility for practice mode improve pitch"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "plot_utility(utility_function=utility_gp(bpm=60, practice_mode=PracticeMode.IMP_PITCH),\n",
+    "                  title=\"Utility: Gaussian Process for IMP_PITCH\", density=30, data_points=training_points[0])"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   }
+  },
+  {
+   "cell_type": "markdown",
+   "source": [
+    "#### 5.4. Utility for practice mode improve timing"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%% md\n"
+    }
+   }
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "outputs": [],
+   "source": [
+    "plot_utility(utility_function=utility_gp(bpm=60, practice_mode=PracticeMode.IMP_TIMING),\n",
+    "                  title=\"Utility: Gaussian Process for IMP_TIMING\", density=30, data_points=training_points[1])"
+   ],
+   "metadata": {
+    "collapsed": false,
+    "pycharm": {
+     "name": "#%%\n"
+    }
+   }
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 2
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython2",
+   "version": "2.7.6"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 0
+}
