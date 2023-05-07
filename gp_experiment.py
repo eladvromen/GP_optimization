@@ -200,6 +200,8 @@ class GaussianProcess:
         return r
         
     #choose the best practice mode from utility estimate
+    
+    #what are we returmning here?
     def get_best_practice_mode(self, complexity_level, task_parameters):
         all_practice_modes = list(PracticeMode)
         if random.random() > 0.05:
