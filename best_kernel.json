@@ -1,1 +1,1 @@
-{"name": "Matern52", "best parameters": {"variance": 5.089429639257508, "lengthscale": 2.8095463984389255, "a": 0.7, "mean_utility": 0.041137238696461985}, "policy-diff": 0.05771076143338213}
+{"name": "linear", "best parameters": {"variance": 0.8401307233693767, "lengthscale": 1.4922513488441453}, "policy-diff": -3.840893176329561}
